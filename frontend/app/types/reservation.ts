@@ -36,11 +36,17 @@ export type Reservation = {
   nameKana: string;
   email: string;
   phone: string;
+  postalCode: string;
+  prefecture: string;
+  city: string;
+  address1: string;
+  building: string;
   pickupDate: string;
   pickupTime: string;
   returnDate: string;
   returnTime: string;
   carType: string;
+  passengerCount: string;
   discountPlan: string;
   insurance: boolean;
   childSeatCount: number;

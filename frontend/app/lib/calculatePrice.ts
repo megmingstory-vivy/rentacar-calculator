@@ -319,9 +319,6 @@ export function calculatePrice(reservation: Reservation): PricingResult {
   const isWidePlanApplied = isWidePlanApplicable(start, end, hoursTotal);
 
   if (isWidePlanApplied) {
-    const season = getDominantSeasonIn24hBlock(start);
-    const firstDayPrice = priceRows[season].day;
-    const widePrice = priceRows[season].wide;
     const seasonLabelMap: Record<SeasonType, string> = {
       weekday: "平日料金",
       weekend: "土日祝料金",
@@ -329,16 +326,51 @@ export function calculatePrice(reservation: Reservation): PricingResult {
       top: "トップシーズン料金",
     };
 
-    basePrice = firstDayPrice + widePrice;
+    const seasonDayCounts: Record<SeasonType, number> = {
+      weekday: 0,
+      weekend: 0,
+      high: 0,
+      top: 0,
+    };
 
-    breakdown.push({
-      label: `${seasonLabelMap[season]}　${formatCurrency(firstDayPrice)}円×1日間`,
-      amount: firstDayPrice,
+    // まず24時間ごとの日額を fullDays 分だけ積み上げる
+    for (let i = 0; i < fullDays; i += 1) {
+      const blockStart = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+      const season = getDominantSeasonIn24hBlock(blockStart);
+      const dayPrice = priceRows[season].day;
+
+      basePrice += dayPrice;
+      seasonDayCounts[season] += 1;
+    }
+
+    (Object.keys(seasonDayCounts) as SeasonType[]).forEach((season) => {
+      const count = seasonDayCounts[season];
+      if (count === 0) return;
+
+      const dayPrice = priceRows[season].day;
+      breakdown.push({
+        label: `${seasonLabelMap[season]}　${formatCurrency(dayPrice)}円×${count}日間`,
+        amount: dayPrice * count,
+      });
     });
+
+    // ワイドプランは最後に1回だけ加算
+    const wideSeason =
+      fullDays > 0
+        ? getDominantSeasonIn24hBlock(
+            new Date(start.getTime() + (fullDays - 1) * 24 * 60 * 60 * 1000),
+          )
+        : getDominantSeasonIn24hBlock(start);
+
+    const widePrice = priceRows[wideSeason].wide;
+    basePrice += widePrice;
+
     breakdown.push({
       label: `ワイドプラン料金　${formatCurrency(widePrice)}円×1回`,
       amount: widePrice,
     });
+
+    // ワイドプラン適用時は extraHours は課金しない
   } else {
     const seasonLabelMap: Record<SeasonType, string> = {
       weekday: "平日料金",
@@ -347,17 +379,32 @@ export function calculatePrice(reservation: Reservation): PricingResult {
       top: "トップシーズン料金",
     };
 
+    const seasonDayCounts: Record<SeasonType, number> = {
+      weekday: 0,
+      weekend: 0,
+      high: 0,
+      top: 0,
+    };
+
     for (let i = 0; i < fullDays; i += 1) {
       const blockStart = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
       const season = getDominantSeasonIn24hBlock(blockStart);
       const dayPrice = priceRows[season].day;
-      basePrice += dayPrice;
 
-      breakdown.push({
-        label: `${seasonLabelMap[season]}　${formatCurrency(dayPrice)}円×1日間`,
-        amount: dayPrice,
-      });
+      basePrice += dayPrice;
+      seasonDayCounts[season] += 1;
     }
+
+    (Object.keys(seasonDayCounts) as SeasonType[]).forEach((season) => {
+      const count = seasonDayCounts[season];
+      if (count === 0) return;
+
+      const dayPrice = priceRows[season].day;
+      breakdown.push({
+        label: `${seasonLabelMap[season]}　${formatCurrency(dayPrice)}円×${count}日間`,
+        amount: dayPrice * count,
+      });
+    });
 
     if (extraHours > 0) {
       const season = getSeason(end);
@@ -373,23 +420,28 @@ export function calculatePrice(reservation: Reservation): PricingResult {
   }
 
   const originalBasePrice = basePrice;
+  let discountedPrice = basePrice;
 
   const longDiscountRate = reservation.discountPlan.includes("長期")
     ? getLongDiscountRate(hoursTotal)
     : 0;
 
+  // 長期割引
   if (longDiscountRate > 0) {
-    const amount = Math.round(basePrice * longDiscountRate);
-    basePrice -= amount;
+    const amount = Math.round(discountedPrice * longDiscountRate);
+    discountedPrice -= amount;
+
     breakdown.push({
       label: `長期割引　${longDiscountRate * 100}%`,
       amount: -amount,
     });
   }
 
+  // 　リピート割引
   if (isRepeatDiscount(reservation)) {
-    const amount = Math.round(basePrice * 0.05);
-    basePrice -= amount;
+    const amount = Math.round(discountedPrice * 0.05);
+    discountedPrice -= amount;
+
     breakdown.push({
       label: "リピート割引　5%",
       amount: -amount,
@@ -410,9 +462,13 @@ export function calculatePrice(reservation: Reservation): PricingResult {
     });
   }
 
-  const total = basePrice + optionPrice + insurancePrice;
+  // 合計の計算
+  const total = discountedPrice + optionPrice + insurancePrice;
+
   const deposit = Math.round(total * 0.5);
-  const discountAmount = originalBasePrice - basePrice;
+
+  // 割引額
+  const discountAmount = basePrice - discountedPrice;
 
   if (
     Number.isNaN(basePrice) ||
