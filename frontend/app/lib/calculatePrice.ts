@@ -404,7 +404,7 @@ export function calculatePrice(reservation: Reservation): PricingResult {
         basePrice += dayPrice;
 
         breakdown.push({
-          label: `${seasonLabelMap[season]}　1日料金適用（時間料金より安いため）`,
+          label: `${seasonLabelMap[season]}　時間料金:1日料金適用（10時間を超えると1日料金のほうが安くなるため）`,
           amount: dayPrice,
         });
       } else {
