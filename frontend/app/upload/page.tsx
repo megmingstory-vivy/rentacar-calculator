@@ -409,17 +409,8 @@ ${
   const discountAmountExcluded =
     discountAmount > 0 ? toTaxExcluded(discountAmount) : 0;
 
-  // 消費税合計（基本料金 + オプション + 安心補償 + 割引）
-  const taxTotal =
-    (item.basePrice !== null ? calcTaxFromIncluded(item.basePrice) : 0) +
-    (optionAmount > 0 ? calcTaxFromIncluded(optionAmount) : 0) +
-    (insuranceAmount > 0 ? calcTaxFromIncluded(insuranceAmount) : 0) +
-    (discountAmount > 0 ? calcTaxFromIncluded(discountAmount) : 0);
-
-  // 消費税
-  const taxAmount = item.breakdown
-    .filter((line) => line.label.includes("消費税"))
-    .reduce((sum, line) => sum + line.amount, 0);
+  // 消費税合計
+  const taxTotal = item.total !== null ? calcTaxFromIncluded(item.total) : "";
 
   // 店頭精算額
   const storeSettlementAmount =

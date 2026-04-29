@@ -318,22 +318,20 @@ export function calculatePrice(reservation: Reservation): PricingResult {
   let basePrice = 0;
   const isWidePlanApplied = isWidePlanApplicable(start, end, hoursTotal);
 
-  if (isWidePlanApplied) {
-    const seasonLabelMap: Record<SeasonType, string> = {
-      weekday: "平日料金",
-      weekend: "土日祝料金",
-      high: "ハイシーズン料金",
-      top: "トップシーズン料金",
-    };
+  const seasonLabelMap: Record<SeasonType, string> = {
+    weekday: "平日料金",
+    weekend: "土日祝料金",
+    high: "ハイシーズン料金",
+    top: "トップシーズン料金",
+  };
 
+  if (isWidePlanApplied) {
     const seasonDayCounts: Record<SeasonType, number> = {
       weekday: 0,
       weekend: 0,
       high: 0,
       top: 0,
     };
-
-    // まず24時間ごとの日額を fullDays 分だけ積み上げる
     for (let i = 0; i < fullDays; i += 1) {
       const blockStart = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
       const season = getDominantSeasonIn24hBlock(blockStart);
@@ -354,7 +352,6 @@ export function calculatePrice(reservation: Reservation): PricingResult {
       });
     });
 
-    // ワイドプランは最後に1回だけ加算
     const wideSeason =
       fullDays > 0
         ? getDominantSeasonIn24hBlock(
@@ -369,23 +366,13 @@ export function calculatePrice(reservation: Reservation): PricingResult {
       label: `ワイドプラン料金　${formatCurrency(widePrice)}円×1回`,
       amount: widePrice,
     });
-
-    // ワイドプラン適用時は extraHours は課金しない
   } else {
-    const seasonLabelMap: Record<SeasonType, string> = {
-      weekday: "平日料金",
-      weekend: "土日祝料金",
-      high: "ハイシーズン料金",
-      top: "トップシーズン料金",
-    };
-
     const seasonDayCounts: Record<SeasonType, number> = {
       weekday: 0,
       weekend: 0,
       high: 0,
       top: 0,
     };
-
     for (let i = 0; i < fullDays; i += 1) {
       const blockStart = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
       const season = getDominantSeasonIn24hBlock(blockStart);
@@ -407,15 +394,27 @@ export function calculatePrice(reservation: Reservation): PricingResult {
     });
 
     if (extraHours > 0) {
-      const season = getSeason(end);
+      const season = fullDays === 0 ? getSeason(start) : getSeason(end);
       const hourPrice = priceRows[season].hour;
-      const extraAmount = hourPrice * extraHours;
-      basePrice += extraAmount;
+      const dayPrice = priceRows[season].day;
 
-      breakdown.push({
-        label: `${seasonLabelMap[season]}　${formatCurrency(hourPrice)}円×${extraHours}時間`,
-        amount: extraAmount,
-      });
+      const hourlyAmount = hourPrice * extraHours;
+
+      if (hourlyAmount > dayPrice) {
+        basePrice += dayPrice;
+
+        breakdown.push({
+          label: `${seasonLabelMap[season]}　1日料金適用（時間料金より安いため）`,
+          amount: dayPrice,
+        });
+      } else {
+        basePrice += hourlyAmount;
+
+        breakdown.push({
+          label: `${seasonLabelMap[season]}　${formatCurrency(hourPrice)}円×${extraHours}時間`,
+          amount: hourlyAmount,
+        });
+      }
     }
   }
 
@@ -426,7 +425,6 @@ export function calculatePrice(reservation: Reservation): PricingResult {
     ? getLongDiscountRate(hoursTotal)
     : 0;
 
-  // 長期割引
   if (longDiscountRate > 0) {
     const amount = Math.round(discountedPrice * longDiscountRate);
     discountedPrice -= amount;
@@ -437,7 +435,6 @@ export function calculatePrice(reservation: Reservation): PricingResult {
     });
   }
 
-  // 　リピート割引
   if (isRepeatDiscount(reservation)) {
     const amount = Math.round(discountedPrice * 0.05);
     discountedPrice -= amount;
@@ -455,6 +452,7 @@ export function calculatePrice(reservation: Reservation): PricingResult {
   const insurancePrice = reservation.insurance
     ? INSURANCE_PER_DAY * chargeDays
     : 0;
+
   if (insurancePrice > 0) {
     breakdown.push({
       label: `安心補償サービス　${formatCurrency(INSURANCE_PER_DAY)}円×${chargeDays}日間`,
@@ -462,13 +460,9 @@ export function calculatePrice(reservation: Reservation): PricingResult {
     });
   }
 
-  // 合計の計算
   const total = discountedPrice + optionPrice + insurancePrice;
-
   const deposit = Math.round(total * 0.5);
-
-  // 割引額
-  const discountAmount = basePrice - discountedPrice;
+  const discountAmount = originalBasePrice - discountedPrice;
 
   if (
     Number.isNaN(basePrice) ||
